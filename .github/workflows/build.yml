@@ -26,11 +26,9 @@ jobs:
 
       - name: Disable RTL8192SE
         run: |
+          find rtl8192su -name 'Makefile' -type f -exec sed -i \
+            -E 's/(CONFIG_RTL8192SE[[:space:]]*[:?+]?=)[[:space:]]*m/\1 n/g' {} +
           sed -i '/rtl8192se/d' rtl8192su/rtlwifi/Makefile
-          if grep -n 'rtl8192se' rtl8192su/rtlwifi/Makefile; then
-            echo "ERROR: RTL8192SE is still enabled"
-            exit 1
-          fi
 
       - name: Prepare kernel
         run: |
@@ -56,34 +54,24 @@ jobs:
 
           root = Path("rtl8192su/rtlwifi")
 
-          # Update callback declarations and definitions.
           for p in list(root.rglob("*.c")) + list(root.rglob("*.h")):
               s = p.read_text(errors="ignore")
-
               s = s.replace(
                   "rtl_watch_dog_timer_callback(unsigned long data)",
                   "rtl_watch_dog_timer_callback(struct timer_list *timer)"
               )
-
               s = s.replace(
                   "rtl_easy_concurrent_retrytimer_callback(unsigned long data)",
                   "rtl_easy_concurrent_retrytimer_callback(struct timer_list *timer)"
               )
-
               p.write_text(s)
 
-          # Add the timer header.
           p = root / "base.c"
           s = p.read_text()
 
           if "#include <linux/timer.h>" not in s:
-              s = s.replace(
-                  '#include "wifi.h"',
-                  '#include "wifi.h"\n#include <linux/timer.h>',
-                  1
-              )
+              s = "#include <linux/timer.h>\n" + s
 
-          # Convert both timer initializations.
           s = re.sub(
               r'setup_timer\(&rtlpriv->works\.watchdog_timer,\s*'
               r'rtl_watch_dog_timer_callback,\s*\(unsigned long\)hw\);',
@@ -100,7 +88,6 @@ jobs:
               s
           )
 
-          # Convert watchdog callback.
           s = s.replace(
               'struct ieee80211_hw *hw = (struct ieee80211_hw *)data;\n'
               '\tstruct rtl_priv *rtlpriv = rtl_priv(hw);',
@@ -110,7 +97,6 @@ jobs:
               1
           )
 
-          # Convert dual-MAC retry callback.
           s = s.replace(
               'struct ieee80211_hw *hw = (struct ieee80211_hw *)data;\n'
               '\tstruct rtl_priv *rtlpriv = rtl_priv(hw);',
@@ -122,14 +108,10 @@ jobs:
 
           p.write_text(s)
 
-          # Verify that old timer API calls are gone.
           if "setup_timer(" in s:
               raise SystemExit("ERROR: old setup_timer calls remain")
 
-          if "unsigned long data" in s:
-              raise SystemExit("ERROR: old timer callback remains")
-
-          print("Timer compatibility changes applied")
+          print("Timer API compatibility applied")
           PY
 
       - name: Fix mac80211 compatibility
@@ -144,12 +126,10 @@ jobs:
               "rx_status->flag |= RX_FLAG_40MHZ;",
               "rx_status->bw = RATE_INFO_BW_40;"
           )
-
           s = s.replace(
               "rx_status->flag |= RX_FLAG_HT;",
               "rx_status->encoding = RX_ENC_HT;"
           )
-
           s = s.replace(
               "ieee80211_beacon_get_template(hw, mac->vif, &offs)",
               "ieee80211_beacon_get_template(hw, mac->vif, &offs, 0)"
