@@ -48,6 +48,73 @@ jobs:
             -e 's/sta->vht_cap/sta->deflink.vht_cap/g' \
             -e 's/__kernel_time_t/long/g' {} +
 
+      - name: Fix timer API for Linux 6.18
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path("rtl8192su/rtlwifi")
+          files = list(root.rglob("*.c")) + list(root.rglob("*.h"))
+
+          for p in files:
+              s = p.read_text(errors="ignore")
+
+              s = s.replace(
+                  "void rtl_watch_dog_timer_callback(unsigned long data)",
+                  "void rtl_watch_dog_timer_callback(struct timer_list *timer)"
+              )
+              s = s.replace(
+                  "void rtl_easy_concurrent_retrytimer_callback(unsigned long data)",
+                  "void rtl_easy_concurrent_retrytimer_callback(struct timer_list *timer)"
+              )
+
+              s = s.replace(
+                  "rtl_watch_dog_timer_callback, (unsigned long)hw);",
+                  "rtl_watch_dog_timer_callback);"
+              )
+              s = s.replace(
+                  "rtl_easy_concurrent_retrytimer_callback, (unsigned long)hw);",
+                  "rtl_easy_concurrent_retrytimer_callback);"
+              )
+
+              s = s.replace(
+                  "setup_timer(&rtlpriv->works.watchdog_timer,\n"
+                  "		    rtl_watch_dog_timer_callback);",
+                  "timer_setup(&rtlpriv->works.watchdog_timer,\n"
+                  "		    rtl_watch_dog_timer_callback, 0);"
+              )
+              s = s.replace(
+                  "setup_timer(&rtlpriv->works.dualmac_easyconcurrent_retrytimer,\n"
+                  "		    rtl_easy_concurrent_retrytimer_callback);",
+                  "timer_setup(&rtlpriv->works.dualmac_easyconcurrent_retrytimer,\n"
+                  "		    rtl_easy_concurrent_retrytimer_callback, 0);"
+              )
+
+              s = s.replace(
+                  "struct ieee80211_hw *hw = (struct ieee80211_hw *)data;\n"
+                  "\tstruct rtl_priv *rtlpriv = rtl_priv(hw);",
+                  "struct rtl_priv *rtlpriv = from_timer(rtlpriv, timer, works.watchdog_timer);\n"
+                  "\tstruct ieee80211_hw *hw = rtlpriv->works.hw;"
+              )
+
+              s = s.replace(
+                  "struct ieee80211_hw *hw = (struct ieee80211_hw *)data;\n"
+                  "\tstruct rtl_priv *rtlpriv = rtl_priv(hw);",
+                  "struct rtl_priv *rtlpriv = from_timer(rtlpriv, timer, works.dualmac_easyconcurrent_retrytimer);\n"
+                  "\tstruct ieee80211_hw *hw = rtlpriv->works.hw;",
+                  1
+              )
+
+              if p.name == "base.c" and '#include <linux/timer.h>' not in s:
+                  s = s.replace(
+                      '#include "wifi.h"',
+                      '#include "wifi.h"\n#include <linux/timer.h>'
+                  )
+
+              p.write_text(s)
+          PY
+
       - name: Fix mac80211 compatibility
         run: |
           python3 - <<'PY'
