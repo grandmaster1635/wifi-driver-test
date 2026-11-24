@@ -154,7 +154,6 @@ jobs:
 
           base.write_text(s)
           header.write_text(h)
-
           print("Timer API conversion verified")
           PY
 
@@ -182,6 +181,71 @@ jobs:
 
           p.write_text(s)
           print("mac80211 compatibility changes verified")
+          PY
+
+      - name: Fix core mac80211 API
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("rtl8192su/rtlwifi/core.c")
+          s = p.read_text()
+
+          replacements = [
+              (
+                  "static void rtl_op_stop(struct ieee80211_hw *hw)",
+                  "static void rtl_op_stop(struct ieee80211_hw *hw, bool suspend)"
+              ),
+              (
+                  "static int rtl_op_config(struct ieee80211_hw *hw, u32 changed)",
+                  "static int rtl_op_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)"
+              ),
+              (
+                  "static int rtl_op_conf_tx(struct ieee80211_hw *hw,\n"
+                  "\t\t\t  struct ieee80211_vif *vif, u16 queue,\n"
+                  "\t\t\t  const struct ieee80211_tx_queue_params *param)",
+                  "static int rtl_op_conf_tx(struct ieee80211_hw *hw,\n"
+                  "\t\t\t  struct ieee80211_vif *vif,\n"
+                  "\t\t\t  unsigned int link_id, u16 queue,\n"
+                  "\t\t\t  const struct ieee80211_tx_queue_params *param)"
+              ),
+              (
+                  "struct ieee80211_bss_conf *bss_conf, u32 changed)",
+                  "struct ieee80211_bss_conf *bss_conf, u64 changed)"
+              ),
+              (
+                  "ieee80211_beacon_get(hw, vif)",
+                  "ieee80211_beacon_get(hw, vif, 0)"
+              ),
+              ("bss_conf->assoc", "vif->cfg.assoc"),
+              ("bss_conf->aid", "vif->cfg.aid"),
+          ]
+
+          for old, new in replacements:
+              if old not in s:
+                  raise SystemExit("ERROR: expected core.c code not found: " + old)
+              s = s.replace(old, new, 1)
+
+          s = s.replace(
+              "static void rtl_op_stop(struct ieee80211_hw *hw, bool suspend)\n{",
+              "static void rtl_op_stop(struct ieee80211_hw *hw, bool suspend)\n{\n\t(void)suspend;",
+              1
+          )
+
+          s = s.replace(
+              "static int rtl_op_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)\n{",
+              "static int rtl_op_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)\n{\n\t(void)radio_idx;",
+              1
+          )
+
+          s = s.replace(
+              "\t\t\t  const struct ieee80211_tx_queue_params *param)\n{",
+              "\t\t\t  const struct ieee80211_tx_queue_params *param)\n{\n\t(void)link_id;",
+              1
+          )
+
+          p.write_text(s)
+          print("core.c compatibility changes applied")
           PY
 
       - name: Build driver
