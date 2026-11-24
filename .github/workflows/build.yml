@@ -27,8 +27,9 @@ jobs:
       - name: Disable RTL8192SE
         run: |
           find rtl8192su -name 'Makefile' -type f -exec sed -i \
-            -E 's/(CONFIG_RTL8192SE[[:space:]]*[:?+]?=)[[:space:]]*m/\1 n/g' {} +
+            -E 's/(CONFIG_RTL8192SE[[:space:]]*[:?+]?=)[[:space:]]*m/\1n/g' {} +
           sed -i '/rtl8192se/d' rtl8192su/rtlwifi/Makefile
+          grep -R "CONFIG_RTL8192SE" rtl8192su --include='Makefile' || true
 
       - name: Prepare kernel
         run: |
