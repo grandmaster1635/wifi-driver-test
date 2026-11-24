@@ -58,73 +58,84 @@ jobs:
           s = base.read_text()
           h = header.read_text()
 
+          # Force timer.h to the very beginning of base.c
           if "#include <linux/timer.h>" not in s:
-              match = re.search(r"^#include\s", s, re.MULTILINE)
-              if not match:
-                  raise SystemExit("ERROR: include section not found in base.c")
-              s = s[:match.start()] + "#include <linux/timer.h>\n" + s[match.start():]
+              s = "#include <linux/timer.h>\n" + s
 
-          h = re.sub(
-              r"(void\s+rtl_watch_dog_timer_callback)\s*\(\s*unsigned long\s+\w+\s*\)\s*;",
-              r"\1(struct timer_list *timer);",
-              h
-          )
-          h = re.sub(
-              r"(void\s+rtl_easy_concurrent_retrytimer_callback)\s*\(\s*unsigned long\s+\w+\s*\)\s*;",
-              r"\1(struct timer_list *timer);",
-              h
-          )
-
+          # Convert timer initialization
           s = re.sub(
-              r"(void\s+rtl_watch_dog_timer_callback)\s*\(\s*unsigned long\s+\w+\s*\)",
-              r"\1(struct timer_list *timer)",
-              s
-          )
-          s = re.sub(
-              r"(void\s+rtl_easy_concurrent_retrytimer_callback)\s*\(\s*unsigned long\s+\w+\s*\)",
-              r"\1(struct timer_list *timer)",
+              r"setup_timer\(&rtlpriv->works\.watchdog_timer,\s*"
+              r"rtl_watch_dog_timer_callback,\s*\(unsigned long\)hw\);",
+              "timer_setup(&rtlpriv->works.watchdog_timer, "
+              "rtl_watch_dog_timer_callback, 0);",
               s
           )
 
-          old = re.compile(
-              r"struct ieee80211_hw\s+\*hw\s*=\s*\(struct ieee80211_hw\s*\*\)\w+\s*;\s*"
-              r"struct rtl_priv\s+\*rtlpriv\s*=\s*rtl_priv\(hw\)\s*;"
+          s = re.sub(
+              r"setup_timer\(&rtlpriv->works\.dualmac_easyconcurrent_retrytimer,\s*"
+              r"rtl_easy_concurrent_retrytimer_callback,\s*\(unsigned long\)hw\);",
+              "timer_setup(&rtlpriv->works.dualmac_easyconcurrent_retrytimer, "
+              "rtl_easy_concurrent_retrytimer_callback, 0);",
+              s
           )
 
-          new_watchdog = (
-              "struct rtl_priv *rtlpriv = from_timer(rtlpriv, timer, works.watchdog_timer);\n"
-              "\tstruct ieee80211_hw *hw = rtlpriv->works.hw;"
-          )
-          new_retry = (
-              "struct rtl_priv *rtlpriv = from_timer(rtlpriv, timer, works.dualmac_easyconcurrent_retrytimer);\n"
-              "\tstruct ieee80211_hw *hw = rtlpriv->works.hw;"
+          # Convert callback declarations in base.h
+          h = re.sub(
+              r"void\s+rtl_watch_dog_timer_callback\s*\(\s*unsigned long\s+\w+\s*\)\s*;",
+              "void rtl_watch_dog_timer_callback(struct timer_list *timer);",
+              h
           )
 
-          s, count1 = old.subn(new_watchdog, s, count=1)
-          s, count2 = old.subn(new_retry, s, count=1)
+          h = re.sub(
+              r"void\s+rtl_easy_concurrent_retrytimer_callback\s*\(\s*unsigned long\s+\w+\s*\)\s*;",
+              "void rtl_easy_concurrent_retrytimer_callback(struct timer_list *timer);",
+              h
+          )
 
-          if count1 != 1 or count2 != 1:
-              raise SystemExit(
-                  f"ERROR: callback conversion failed: watchdog={count1}, retry={count2}"
-              )
+          # Convert watchdog callback
+          s = re.sub(
+              r"void rtl_watch_dog_timer_callback\s*\(\s*unsigned long data\s*\)\s*\{"
+              r"\s*struct ieee80211_hw \*hw = \(struct ieee80211_hw \*\)data;"
+              r"\s*struct rtl_priv \*rtlpriv = rtl_priv\(hw\);",
+              "void rtl_watch_dog_timer_callback(struct timer_list *timer)\n"
+              "{\n"
+              "\tstruct rtl_priv *rtlpriv = from_timer(rtlpriv, timer, works.watchdog_timer);\n"
+              "\tstruct ieee80211_hw *hw = rtlpriv->works.hw;",
+              s
+          )
+
+          # Convert easy concurrent retry callback
+          s = re.sub(
+              r"void rtl_easy_concurrent_retrytimer_callback\s*\(\s*unsigned long data\s*\)\s*\{"
+              r"\s*struct ieee80211_hw \*hw = \(struct ieee80211_hw \*\)data;"
+              r"\s*struct rtl_priv \*rtlpriv = rtl_priv\(hw\);",
+              "void rtl_easy_concurrent_retrytimer_callback(struct timer_list *timer)\n"
+              "{\n"
+              "\tstruct rtl_priv *rtlpriv = from_timer(rtlpriv, timer, works.dualmac_easyconcurrent_retrytimer);\n"
+              "\tstruct ieee80211_hw *hw = rtlpriv->works.hw;",
+              s
+          )
 
           base.write_text(s)
           header.write_text(h)
 
-          for name, content in [("base.c", s), ("base.h", h)]:
-              if re.search(
-                  r"rtl_(?:watch_dog_timer|easy_concurrent_retrytimer)_callback\s*\(\s*unsigned long",
-                  content
-              ):
-                  raise SystemExit(f"ERROR: old timer declaration remains in {name}")
+          # Verify all conversions
+          if "setup_timer(" in s:
+              raise SystemExit("ERROR: old setup_timer remains")
+
+          if s.count("timer_setup(") < 2:
+              raise SystemExit("ERROR: timer_setup conversion incomplete")
+
+          if s.count("from_timer(") < 2:
+              raise SystemExit("ERROR: callback conversion incomplete")
 
           if "#include <linux/timer.h>" not in s:
               raise SystemExit("ERROR: timer.h missing")
 
-          if s.count("from_timer(") < 2:
-              raise SystemExit("ERROR: timer callbacks were not converted")
+          if "unsigned long data" in h:
+              raise SystemExit("ERROR: old callback declaration remains in base.h")
 
-          print("Timer API compatibility fixes applied successfully")
+          print("Timer API fixes verified successfully")
           PY
 
       - name: Fix mac80211 compatibility
