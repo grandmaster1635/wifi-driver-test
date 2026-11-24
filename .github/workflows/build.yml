@@ -24,6 +24,17 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/chunkeey/rtl8192su.git rtl8192su
 
+      - name: Disable RTL8192SE
+        run: |
+          sed -i '/rtl8192se/d' rtl8192su/rtlwifi/Makefile
+          echo "Checking that RTL8192SE is excluded:"
+          if grep -n 'rtl8192se' rtl8192su/rtlwifi/Makefile; then
+            echo "ERROR: RTL8192SE is still enabled"
+            exit 1
+          else
+            echo "RTL8192SE excluded"
+          fi
+
       - name: Prepare kernel
         run: |
           cd linux
