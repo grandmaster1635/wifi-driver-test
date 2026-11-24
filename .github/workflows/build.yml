@@ -27,12 +27,9 @@ jobs:
       - name: Disable RTL8192SE
         run: |
           sed -i '/rtl8192se/d' rtl8192su/rtlwifi/Makefile
-          echo "Checking that RTL8192SE is excluded:"
           if grep -n 'rtl8192se' rtl8192su/rtlwifi/Makefile; then
             echo "ERROR: RTL8192SE is still enabled"
             exit 1
-          else
-            echo "RTL8192SE excluded"
           fi
 
       - name: Prepare kernel
@@ -48,6 +45,7 @@ jobs:
             -e 's/sta->ht_cap/sta->deflink.ht_cap/g' \
             -e 's/sta->supp_rates/sta->deflink.supp_rates/g' \
             -e 's/sta->bandwidth/sta->deflink.bandwidth/g' \
+            -e 's/sta->vht_cap/sta->deflink.vht_cap/g' \
             -e 's/__kernel_time_t/long/g' {} +
 
       - name: Fix mac80211 compatibility
