@@ -31,6 +31,10 @@ jobs:
           make olddefconfig
           make -j2 modules_prepare
 
+            - name: Fix legacy time type
+        run: |
+          sed -i 's/__kernel_time_t/long/g' rtl8192su/rtlwifi/wifi.h
+
       - name: Test driver compilation
         run: |
           make -C rtl8192su KSRC="$GITHUB_WORKSPACE/linux" V=1
