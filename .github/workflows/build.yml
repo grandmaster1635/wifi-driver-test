@@ -36,7 +36,8 @@ jobs:
           find rtl8192su/rtlwifi -type f \( -name '*.c' -o -name '*.h' \) -exec sed -i \
             -e 's/sta->ht_cap/sta->deflink.ht_cap/g' \
             -e 's/sta->supp_rates/sta->deflink.supp_rates/g' \
-            -e 's/sta->bandwidth/sta->deflink.bandwidth/g' {} +
+            -e 's/sta->bandwidth/sta->deflink.bandwidth/g' \
+            -e 's/__kernel_time_t/long/g' {} +
 
       - name: Build driver
         run: |
