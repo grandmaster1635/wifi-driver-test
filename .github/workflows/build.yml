@@ -1,3 +1,4 @@
+
 name: RTL8191SU driver build test
 
 'on':
@@ -80,7 +81,11 @@ jobs:
           old_delete = "del_timer_sync(&rtlpriv->works.watchdog_timer);"
           if old_delete not in s:
               raise SystemExit("ERROR: del_timer_sync call not found")
-          s = s.replace(old_delete, "timer_delete_sync(&rtlpriv->works.watchdog_timer);", 1)
+          s = s.replace(
+              old_delete,
+              "timer_delete_sync(&rtlpriv->works.watchdog_timer);",
+              1
+          )
 
           old_watchdog = """void rtl_watch_dog_timer_callback(unsigned long data)
           {
@@ -90,8 +95,7 @@ jobs:
           new_watchdog = """void rtl_watch_dog_timer_callback(struct timer_list *timer)
           {
           \tstruct rtl_priv *rtlpriv =
-          \t\ttimer_container_of(rtlpriv, timer, works.watchdog_timer);
-          \tstruct ieee80211_hw *hw = rtlpriv->works.hw;"""
+          \t\ttimer_container_of(rtlpriv, timer, works.watchdog_timer);"""
 
           if old_watchdog not in s:
               raise SystemExit("ERROR: watchdog callback not found")
@@ -128,8 +132,16 @@ jobs:
           if old_decl1 not in h or old_decl2 not in h:
               raise SystemExit("ERROR: old timer declarations not found")
 
-          h = h.replace(old_decl1, "void rtl_watch_dog_timer_callback(struct timer_list *timer);", 1)
-          h = h.replace(old_decl2, "void rtl_easy_concurrent_retrytimer_callback(struct timer_list *timer);", 1)
+          h = h.replace(
+              old_decl1,
+              "void rtl_watch_dog_timer_callback(struct timer_list *timer);",
+              1
+          )
+          h = h.replace(
+              old_decl2,
+              "void rtl_easy_concurrent_retrytimer_callback(struct timer_list *timer);",
+              1
+          )
 
           if any(x in s for x in ("setup_timer(", "del_timer_sync(", "from_timer(")):
               raise SystemExit("ERROR: old timer API remains")
