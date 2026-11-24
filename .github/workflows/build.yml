@@ -1,198 +1,186 @@
 name: RTL8191SU driver build test
 
 'on':
-workflow_dispatch:
-push:
-branches:
-- main
+  workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
-build:
-runs-on: ubuntu-24.04
+  build:
+    runs-on: ubuntu-24.04
 
-steps:
-  - name: Install dependencies
-    run: |
-      sudo apt-get update
-      sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev dwarves git python3
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev dwarves git python3
 
-  - name: Download Linux kernel
-    run: |
-      git clone --depth 1 --branch linux-6.18.y https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git linux
+      - name: Download Linux kernel
+        run: |
+          git clone --depth 1 --branch linux-6.18.y https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git linux
 
-  - name: Download RTL8191SU driver
-    run: |
-      git clone --depth 1 https://github.com/chunkeey/rtl8192su.git rtl8192su
+      - name: Download RTL8191SU driver
+        run: |
+          git clone --depth 1 https://github.com/chunkeey/rtl8192su.git rtl8192su
 
-  - name: Disable RTL8192SE
-    run: |
-      find rtl8192su -name 'Makefile' -type f -exec sed -i \
-        -E 's/(CONFIG_RTL8192SE[[:space:]]*[:?+]?=)[[:space:]]*m/\1n/g' {} +
-      sed -i '/rtl8192se/d' rtl8192su/rtlwifi/Makefile
+      - name: Disable RTL8192SE
+        run: |
+          find rtl8192su -name 'Makefile' -type f -exec sed -i \
+            -E 's/(CONFIG_RTL8192SE[[:space:]]*[:?+]?=)[[:space:]]*m/\1n/g' {} +
+          sed -i '/rtl8192se/d' rtl8192su/rtlwifi/Makefile
 
-  - name: Prepare kernel
-    run: |
-      cd linux
-      make x86_64_defconfig
-      make olddefconfig
-      make -j2 modules_prepare
+      - name: Prepare kernel
+        run: |
+          cd linux
+          make x86_64_defconfig
+          make olddefconfig
+          make -j2 modules_prepare
 
-  - name: Fix Linux 6.18 compatibility
-    run: |
-      find rtl8192su/rtlwifi -type f \( -name '*.c' -o -name '*.h' \) -exec sed -i \
-        -e 's/sta->ht_cap/sta->deflink.ht_cap/g' \
-        -e 's/sta->supp_rates/sta->deflink.supp_rates/g' \
-        -e 's/sta->bandwidth/sta->deflink.bandwidth/g' \
-        -e 's/sta->vht_cap/sta->deflink.vht_cap/g' \
-        -e 's/__kernel_time_t/long/g' {} +
+      - name: Fix Linux 6.18 compatibility
+        run: |
+          find rtl8192su/rtlwifi -type f \( -name '*.c' -o -name '*.h' \) -exec sed -i \
+            -e 's/sta->ht_cap/sta->deflink.ht_cap/g' \
+            -e 's/sta->supp_rates/sta->deflink.supp_rates/g' \
+            -e 's/sta->bandwidth/sta->deflink.bandwidth/g' \
+            -e 's/sta->vht_cap/sta->deflink.vht_cap/g' \
+            -e 's/__kernel_time_t/long/g' {} +
 
-  - name: Fix timer API
-    run: |
-      python3 - <<'PY'
-      from pathlib import Path
+      - name: Fix timer API
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
 
-      base = Path("rtl8192su/rtlwifi/base.c")
-      header = Path("rtl8192su/rtlwifi/base.h")
+          base = Path("rtl8192su/rtlwifi/base.c")
+          header = Path("rtl8192su/rtlwifi/base.h")
 
-      s = base.read_text()
-      h = header.read_text()
+          s = base.read_text()
+          h = header.read_text()
 
-      old_init = """\t/* <1> timer */
-      \tsetup_timer(&rtlpriv->works.watchdog_timer,
-      \t\t    rtl_watch_dog_timer_callback, (unsigned long)hw);
-      \tsetup_timer(&rtlpriv->works.dualmac_easyconcurrent_retrytimer,
-      \t\t    rtl_easy_concurrent_retrytimer_callback, (unsigned long)hw);
-      \t/* <2> work queue */
-      \trtlpriv->works.hw = hw;"""
+          old_init = """\t/* <1> timer */
+          \tsetup_timer(&rtlpriv->works.watchdog_timer,
+          \t\t    rtl_watch_dog_timer_callback, (unsigned long)hw);
+          \tsetup_timer(&rtlpriv->works.dualmac_easyconcurrent_retrytimer,
+          \t\t    rtl_easy_concurrent_retrytimer_callback, (unsigned long)hw);
+          \t/* <2> work queue */
+          \trtlpriv->works.hw = hw;"""
 
-      new_init = """\t/* <1> timer */
-      \trtlpriv->works.hw = hw;
-      \ttimer_setup(&rtlpriv->works.watchdog_timer,
-      \t\t    rtl_watch_dog_timer_callback, 0);
-      \ttimer_setup(&rtlpriv->works.dualmac_easyconcurrent_retrytimer,
-      \t\t    rtl_easy_concurrent_retrytimer_callback, 0);
-      \t/* <2> work queue */"""
+          new_init = """\t/* <1> timer */
+          \trtlpriv->works.hw = hw;
+          \ttimer_setup(&rtlpriv->works.watchdog_timer,
+          \t\t    rtl_watch_dog_timer_callback, 0);
+          \ttimer_setup(&rtlpriv->works.dualmac_easyconcurrent_retrytimer,
+          \t\t    rtl_easy_concurrent_retrytimer_callback, 0);
+          \t/* <2> work queue */"""
 
-      if old_init not in s:
-          raise SystemExit("ERROR: timer initialization block not found")
-      s = s.replace(old_init, new_init, 1)
+          if old_init not in s:
+              raise SystemExit("ERROR: timer initialization block not found")
+          s = s.replace(old_init, new_init, 1)
 
-      old_delete = "del_timer_sync(&rtlpriv->works.watchdog_timer);"
-      if old_delete not in s:
-          raise SystemExit("ERROR: del_timer_sync call not found")
-      s = s.replace(
-          old_delete,
-          "timer_delete_sync(&rtlpriv->works.watchdog_timer);",
-          1
-      )
+          old_delete = "del_timer_sync(&rtlpriv->works.watchdog_timer);"
+          if old_delete not in s:
+              raise SystemExit("ERROR: del_timer_sync call not found")
+          s = s.replace(old_delete, "timer_delete_sync(&rtlpriv->works.watchdog_timer);", 1)
 
-      old_watchdog = """void rtl_watch_dog_timer_callback(unsigned long data)
-      {
-      \tstruct ieee80211_hw *hw = (struct ieee80211_hw *)data;
-      \tstruct rtl_priv *rtlpriv = rtl_priv(hw);"""
+          old_watchdog = """void rtl_watch_dog_timer_callback(unsigned long data)
+          {
+          \tstruct ieee80211_hw *hw = (struct ieee80211_hw *)data;
+          \tstruct rtl_priv *rtlpriv = rtl_priv(hw);"""
 
-      new_watchdog = """void rtl_watch_dog_timer_callback(struct timer_list *timer)
-      {
-      \tstruct rtl_priv *rtlpriv =
-      \t\ttimer_container_of(rtlpriv, timer, works.watchdog_timer);
-      \tstruct ieee80211_hw *hw = rtlpriv->works.hw;"""
+          new_watchdog = """void rtl_watch_dog_timer_callback(struct timer_list *timer)
+          {
+          \tstruct rtl_priv *rtlpriv =
+          \t\ttimer_container_of(rtlpriv, timer, works.watchdog_timer);
+          \tstruct ieee80211_hw *hw = rtlpriv->works.hw;"""
 
-      if old_watchdog not in s:
-          raise SystemExit("ERROR: watchdog callback not found")
-      s = s.replace(old_watchdog, new_watchdog, 1)
+          if old_watchdog not in s:
+              raise SystemExit("ERROR: watchdog callback not found")
+          s = s.replace(old_watchdog, new_watchdog, 1)
 
-      old_retry = """void rtl_easy_concurrent_retrytimer_callback(unsigned long data)
-      {
-      \tstruct ieee80211_hw *hw = (struct ieee80211_hw *)data;
-      \tstruct rtl_priv *rtlpriv = rtl_priv(hw);"""
+          old_retry = """void rtl_easy_concurrent_retrytimer_callback(unsigned long data)
+          {
+          \tstruct ieee80211_hw *hw = (struct ieee80211_hw *)data;
+          \tstruct rtl_priv *rtlpriv = rtl_priv(hw);"""
 
-      new_retry = """void rtl_easy_concurrent_retrytimer_callback(struct timer_list *timer)
-      {
-      \tstruct rtl_priv *rtlpriv =
-      \t\ttimer_container_of(rtlpriv, timer, works.dualmac_easyconcurrent_retrytimer);
-      \tstruct ieee80211_hw *hw = rtlpriv->works.hw;"""
+          new_retry = """void rtl_easy_concurrent_retrytimer_callback(struct timer_list *timer)
+          {
+          \tstruct rtl_priv *rtlpriv =
+          \t\ttimer_container_of(rtlpriv, timer, works.dualmac_easyconcurrent_retrytimer);
+          \tstruct ieee80211_hw *hw = rtlpriv->works.hw;"""
 
-      if old_retry not in s:
-          raise SystemExit("ERROR: retry timer callback not found")
-      s = s.replace(old_retry, new_retry, 1)
+          if old_retry not in s:
+              raise SystemExit("ERROR: retry timer callback not found")
+          s = s.replace(old_retry, new_retry, 1)
 
-      if "#include <linux/timer.h>" not in s:
-          s = "#include <linux/timer.h>\n" + s
+          if "#include <linux/timer.h>" not in s:
+              s = "#include <linux/timer.h>\n" + s
 
-      if "struct timer_list;" not in h:
-          h = h.replace(
-              "#define __RTL_BASE_H__",
-              "#define __RTL_BASE_H__\n\nstruct timer_list;",
-              1
-          )
+          if "struct timer_list;" not in h:
+              h = h.replace(
+                  "#define __RTL_BASE_H__",
+                  "#define __RTL_BASE_H__\n\nstruct timer_list;",
+                  1
+              )
 
-      old_decl1 = "void rtl_watch_dog_timer_callback(unsigned long data);"
-      old_decl2 = "void rtl_easy_concurrent_retrytimer_callback(unsigned long data);"
+          old_decl1 = "void rtl_watch_dog_timer_callback(unsigned long data);"
+          old_decl2 = "void rtl_easy_concurrent_retrytimer_callback(unsigned long data);"
 
-      if old_decl1 not in h or old_decl2 not in h:
-          raise SystemExit("ERROR: old timer declarations not found")
+          if old_decl1 not in h or old_decl2 not in h:
+              raise SystemExit("ERROR: old timer declarations not found")
 
-      h = h.replace(
-          old_decl1,
-          "void rtl_watch_dog_timer_callback(struct timer_list *timer);",
-          1
-      )
-      h = h.replace(
-          old_decl2,
-          "void rtl_easy_concurrent_retrytimer_callback(struct timer_list *timer);",
-          1
-      )
+          h = h.replace(old_decl1, "void rtl_watch_dog_timer_callback(struct timer_list *timer);", 1)
+          h = h.replace(old_decl2, "void rtl_easy_concurrent_retrytimer_callback(struct timer_list *timer);", 1)
 
-      if any(x in s for x in ("setup_timer(", "del_timer_sync(", "from_timer(")):
-          raise SystemExit("ERROR: old timer API remains")
+          if any(x in s for x in ("setup_timer(", "del_timer_sync(", "from_timer(")):
+              raise SystemExit("ERROR: old timer API remains")
 
-      if s.count("timer_setup(") != 2:
-          raise SystemExit("ERROR: expected two timer_setup calls")
+          if s.count("timer_setup(") != 2:
+              raise SystemExit("ERROR: expected two timer_setup calls")
 
-      if s.count("timer_container_of(") != 2:
-          raise SystemExit("ERROR: expected two timer_container_of calls")
+          if s.count("timer_container_of(") != 2:
+              raise SystemExit("ERROR: expected two timer_container_of calls")
 
-      base.write_text(s)
-      header.write_text(h)
+          base.write_text(s)
+          header.write_text(h)
 
-      print("Timer API conversion verified")
-      PY
+          print("Timer API conversion verified")
+          PY
 
-  - name: Fix mac80211 compatibility
-    run: |
-      python3 - <<'PY'
-      from pathlib import Path
+      - name: Fix mac80211 compatibility
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
 
-      p = Path("rtl8192su/rtlwifi/rtl8192su/trx.c")
-      s = p.read_text()
+          p = Path("rtl8192su/rtlwifi/rtl8192su/trx.c")
+          s = p.read_text()
 
-      replacements = {
-          "rx_status->flag |= RX_FLAG_40MHZ;":
-              "rx_status->bw = RATE_INFO_BW_40;",
-          "rx_status->flag |= RX_FLAG_HT;":
-              "rx_status->encoding = RX_ENC_HT;",
-          "ieee80211_beacon_get_template(hw, mac->vif, &offs)":
-              "ieee80211_beacon_get_template(hw, mac->vif, &offs, 0)",
-      }
+          replacements = {
+              "rx_status->flag |= RX_FLAG_40MHZ;":
+                  "rx_status->bw = RATE_INFO_BW_40;",
+              "rx_status->flag |= RX_FLAG_HT;":
+                  "rx_status->encoding = RX_ENC_HT;",
+              "ieee80211_beacon_get_template(hw, mac->vif, &offs)":
+                  "ieee80211_beacon_get_template(hw, mac->vif, &offs, 0)",
+          }
 
-      for old, new in replacements.items():
-          if old not in s:
-              raise SystemExit("ERROR: expected mac80211 code not found: " + old)
-          s = s.replace(old, new)
+          for old, new in replacements.items():
+              if old not in s:
+                  raise SystemExit("ERROR: expected mac80211 code not found: " + old)
+              s = s.replace(old, new)
 
-      p.write_text(s)
-      print("mac80211 compatibility changes verified")
-      PY
+          p.write_text(s)
+          print("mac80211 compatibility changes verified")
+          PY
 
-  - name: Build driver
-    run: |
-      make -C rtl8192su KSRC="$GITHUB_WORKSPACE/linux" V=1
+      - name: Build driver
+        run: |
+          make -C rtl8192su KSRC="$GITHUB_WORKSPACE/linux" V=1
 
-  - name: Upload build files
-    if: success()
-    uses: actions/upload-artifact@v4
-    with:
-      name: rtl8191su-build
-      path: |
-        rtl8192su/**/*.ko
-        rtl8192su/**/*.o
+      - name: Upload build files
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rtl8191su-build
+          path: |
+            rtl8192su/**/*.ko
+            rtl8192su/**/*.o
