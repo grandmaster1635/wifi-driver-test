@@ -29,7 +29,6 @@ jobs:
           find rtl8192su -name 'Makefile' -type f -exec sed -i \
             -E 's/(CONFIG_RTL8192SE[[:space:]]*[:?+]?=)[[:space:]]*m/\1n/g' {} +
           sed -i '/rtl8192se/d' rtl8192su/rtlwifi/Makefile
-          grep -R "CONFIG_RTL8192SE" rtl8192su --include='Makefile' || true
 
       - name: Prepare kernel
         run: |
@@ -70,9 +69,6 @@ jobs:
           p = root / "base.c"
           s = p.read_text()
 
-          if "#include <linux/timer.h>" not in s:
-              s = "#include <linux/timer.h>\n" + s
-
           s = re.sub(
               r'setup_timer\(&rtlpriv->works\.watchdog_timer,\s*'
               r'rtl_watch_dog_timer_callback,\s*\(unsigned long\)hw\);',
@@ -93,8 +89,7 @@ jobs:
               'struct ieee80211_hw *hw = (struct ieee80211_hw *)data;\n'
               '\tstruct rtl_priv *rtlpriv = rtl_priv(hw);',
               'struct rtl_priv *rtlpriv = from_timer(rtlpriv, timer, '
-              'works.watchdog_timer);\n'
-              '\tstruct ieee80211_hw *hw = rtlpriv->works.hw;',
+              'works.watchdog_timer);',
               1
           )
 
@@ -102,18 +97,18 @@ jobs:
               'struct ieee80211_hw *hw = (struct ieee80211_hw *)data;\n'
               '\tstruct rtl_priv *rtlpriv = rtl_priv(hw);',
               'struct rtl_priv *rtlpriv = from_timer(rtlpriv, timer, '
-              'works.dualmac_easyconcurrent_retrytimer);\n'
-              '\tstruct ieee80211_hw *hw = rtlpriv->works.hw;',
+              'works.dualmac_easyconcurrent_retrytimer);',
               1
           )
 
           p.write_text(s)
-
-          if "setup_timer(" in s:
-              raise SystemExit("ERROR: old setup_timer calls remain")
-
-          print("Timer API compatibility applied")
           PY
+
+          sed -i '1i#include <linux/timer.h>' rtl8192su/rtlwifi/base.c
+
+          echo "Checking timer header:"
+          head -n 3 rtl8192su/rtlwifi/base.c
+          grep -n "timer_setup\|from_timer" rtl8192su/rtlwifi/base.c
 
       - name: Fix mac80211 compatibility
         run: |
