@@ -48,71 +48,88 @@ jobs:
             -e 's/sta->vht_cap/sta->deflink.vht_cap/g' \
             -e 's/__kernel_time_t/long/g' {} +
 
-      - name: Fix timer API for Linux 6.18
+      - name: Fix timer API
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import re
 
           root = Path("rtl8192su/rtlwifi")
-          files = list(root.rglob("*.c")) + list(root.rglob("*.h"))
 
-          for p in files:
+          # Update callback declarations and definitions.
+          for p in list(root.rglob("*.c")) + list(root.rglob("*.h")):
               s = p.read_text(errors="ignore")
 
               s = s.replace(
-                  "void rtl_watch_dog_timer_callback(unsigned long data)",
-                  "void rtl_watch_dog_timer_callback(struct timer_list *timer)"
-              )
-              s = s.replace(
-                  "void rtl_easy_concurrent_retrytimer_callback(unsigned long data)",
-                  "void rtl_easy_concurrent_retrytimer_callback(struct timer_list *timer)"
+                  "rtl_watch_dog_timer_callback(unsigned long data)",
+                  "rtl_watch_dog_timer_callback(struct timer_list *timer)"
               )
 
               s = s.replace(
-                  "rtl_watch_dog_timer_callback, (unsigned long)hw);",
-                  "rtl_watch_dog_timer_callback);"
-              )
-              s = s.replace(
-                  "rtl_easy_concurrent_retrytimer_callback, (unsigned long)hw);",
-                  "rtl_easy_concurrent_retrytimer_callback);"
+                  "rtl_easy_concurrent_retrytimer_callback(unsigned long data)",
+                  "rtl_easy_concurrent_retrytimer_callback(struct timer_list *timer)"
               )
 
-              s = s.replace(
-                  "setup_timer(&rtlpriv->works.watchdog_timer,\n"
-                  "		    rtl_watch_dog_timer_callback);",
-                  "timer_setup(&rtlpriv->works.watchdog_timer,\n"
-                  "		    rtl_watch_dog_timer_callback, 0);"
-              )
-              s = s.replace(
-                  "setup_timer(&rtlpriv->works.dualmac_easyconcurrent_retrytimer,\n"
-                  "		    rtl_easy_concurrent_retrytimer_callback);",
-                  "timer_setup(&rtlpriv->works.dualmac_easyconcurrent_retrytimer,\n"
-                  "		    rtl_easy_concurrent_retrytimer_callback, 0);"
-              )
+              p.write_text(s)
 
-              s = s.replace(
-                  "struct ieee80211_hw *hw = (struct ieee80211_hw *)data;\n"
-                  "\tstruct rtl_priv *rtlpriv = rtl_priv(hw);",
-                  "struct rtl_priv *rtlpriv = from_timer(rtlpriv, timer, works.watchdog_timer);\n"
-                  "\tstruct ieee80211_hw *hw = rtlpriv->works.hw;"
-              )
+          # Add the timer header.
+          p = root / "base.c"
+          s = p.read_text()
 
+          if "#include <linux/timer.h>" not in s:
               s = s.replace(
-                  "struct ieee80211_hw *hw = (struct ieee80211_hw *)data;\n"
-                  "\tstruct rtl_priv *rtlpriv = rtl_priv(hw);",
-                  "struct rtl_priv *rtlpriv = from_timer(rtlpriv, timer, works.dualmac_easyconcurrent_retrytimer);\n"
-                  "\tstruct ieee80211_hw *hw = rtlpriv->works.hw;",
+                  '#include "wifi.h"',
+                  '#include "wifi.h"\n#include <linux/timer.h>',
                   1
               )
 
-              if p.name == "base.c" and '#include <linux/timer.h>' not in s:
-                  s = s.replace(
-                      '#include "wifi.h"',
-                      '#include "wifi.h"\n#include <linux/timer.h>'
-                  )
+          # Convert both timer initializations.
+          s = re.sub(
+              r'setup_timer\(&rtlpriv->works\.watchdog_timer,\s*'
+              r'rtl_watch_dog_timer_callback,\s*\(unsigned long\)hw\);',
+              'timer_setup(&rtlpriv->works.watchdog_timer, '
+              'rtl_watch_dog_timer_callback, 0);',
+              s
+          )
 
-              p.write_text(s)
+          s = re.sub(
+              r'setup_timer\(&rtlpriv->works\.dualmac_easyconcurrent_retrytimer,\s*'
+              r'rtl_easy_concurrent_retrytimer_callback,\s*\(unsigned long\)hw\);',
+              'timer_setup(&rtlpriv->works.dualmac_easyconcurrent_retrytimer, '
+              'rtl_easy_concurrent_retrytimer_callback, 0);',
+              s
+          )
+
+          # Convert watchdog callback.
+          s = s.replace(
+              'struct ieee80211_hw *hw = (struct ieee80211_hw *)data;\n'
+              '\tstruct rtl_priv *rtlpriv = rtl_priv(hw);',
+              'struct rtl_priv *rtlpriv = from_timer(rtlpriv, timer, '
+              'works.watchdog_timer);\n'
+              '\tstruct ieee80211_hw *hw = rtlpriv->works.hw;',
+              1
+          )
+
+          # Convert dual-MAC retry callback.
+          s = s.replace(
+              'struct ieee80211_hw *hw = (struct ieee80211_hw *)data;\n'
+              '\tstruct rtl_priv *rtlpriv = rtl_priv(hw);',
+              'struct rtl_priv *rtlpriv = from_timer(rtlpriv, timer, '
+              'works.dualmac_easyconcurrent_retrytimer);\n'
+              '\tstruct ieee80211_hw *hw = rtlpriv->works.hw;',
+              1
+          )
+
+          p.write_text(s)
+
+          # Verify that old timer API calls are gone.
+          if "setup_timer(" in s:
+              raise SystemExit("ERROR: old setup_timer calls remain")
+
+          if "unsigned long data" in s:
+              raise SystemExit("ERROR: old timer callback remains")
+
+          print("Timer compatibility changes applied")
           PY
 
       - name: Fix mac80211 compatibility
@@ -127,10 +144,12 @@ jobs:
               "rx_status->flag |= RX_FLAG_40MHZ;",
               "rx_status->bw = RATE_INFO_BW_40;"
           )
+
           s = s.replace(
               "rx_status->flag |= RX_FLAG_HT;",
               "rx_status->encoding = RX_ENC_HT;"
           )
+
           s = s.replace(
               "ieee80211_beacon_get_template(hw, mac->vif, &offs)",
               "ieee80211_beacon_get_template(hw, mac->vif, &offs, 0)"
