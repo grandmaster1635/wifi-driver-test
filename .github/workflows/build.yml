@@ -1,6 +1,6 @@
 name: RTL8191SU driver build test
 
-on:
+'on':
 workflow_dispatch:
 push:
 branches:
