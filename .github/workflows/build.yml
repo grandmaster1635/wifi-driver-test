@@ -18,7 +18,7 @@ jobs:
 
       - name: Download Linux 6.18.58
         run: |
-          git clone --depth 1 --branch v6.18.58 https://github.com/torvalds/linux.git linux
+          git clone --depth 1 https://github.com/torvalds/linux.git linux
 
       - name: Download RTL8191SU driver
         run: |
