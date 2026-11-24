@@ -1,1 +1,36 @@
 
+name: RTL8191SU driver build test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev dwarves git
+
+      - name: Download Linux 6.18.58
+        run: |
+          git clone --depth 1 --branch v6.18.58 https://github.com/torvalds/linux.git linux
+
+      - name: Download RTL8191SU driver
+        run: |
+          git clone --depth 1 https://github.com/chunkeey/rtl8192su.git rtl8192su
+
+      - name: Prepare kernel
+        run: |
+          cd linux
+          make x86_64_defconfig
+          make olddefconfig
+          make -j2 modules_prepare
+
+      - name: Test driver compilation
+        run: |
+          make -C rtl8192su KSRC="$GITHUB_WORKSPACE/linux" V=1
