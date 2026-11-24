@@ -1,4 +1,3 @@
-
 name: RTL8191SU driver build test
 
 'on':
@@ -246,6 +245,36 @@ jobs:
 
           p.write_text(s)
           print("core.c compatibility changes applied")
+          PY
+
+      - name: Fix time and fallthrough
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("rtl8192su/rtlwifi/core.c")
+          s = p.read_text()
+
+          if s.count("struct timeval ts;") != 2:
+              raise SystemExit("ERROR: expected two timeval declarations")
+
+          if s.count("do_gettimeofday(&ts);") != 2:
+              raise SystemExit("ERROR: expected two do_gettimeofday calls")
+
+          s = s.replace("struct timeval ts;", "time64_t ts;")
+          s = s.replace("do_gettimeofday(&ts);", "ts = ktime_get_real_seconds();")
+          s = s.replace("ts.tv_sec", "ts")
+
+          if "#include <linux/timekeeping.h>" not in s:
+              s = "#include <linux/timekeeping.h>\n" + s
+
+          if s.count("fallthrough;") < 2:
+              if s.count("/*fall through*/") != 2:
+                  raise SystemExit("ERROR: fallthrough comments not found")
+              s = s.replace("/*fall through*/", "fallthrough;")
+
+          p.write_text(s)
+          print("Time API and fallthrough fixes applied")
           PY
 
       - name: Build driver
