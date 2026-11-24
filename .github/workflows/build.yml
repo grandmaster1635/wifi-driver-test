@@ -14,7 +14,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev dwarves git
+          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev dwarves git python3
 
       - name: Download Linux kernel
         run: |
@@ -39,15 +39,29 @@ jobs:
             -e 's/sta->bandwidth/sta->deflink.bandwidth/g' \
             -e 's/__kernel_time_t/long/g' {} +
 
-      - name: Disable unused RTL8192SE module
+      - name: Fix mac80211 compatibility
         run: |
-          grep -RIl 'CONFIG_RTL8192SE=m' rtl8192su --include='Makefile' --include='*.mk' | while read file; do
-            sed -i 's/CONFIG_RTL8192SE=m/CONFIG_RTL8192SE=n/g' "$file"
-          done
-          if grep -R 'CONFIG_RTL8192SE=m' rtl8192su --include='Makefile' --include='*.mk'; then
-            echo "RTL8192SE is still enabled"
-            exit 1
-          fi
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("rtl8192su/rtlwifi/rtl8192su/trx.c")
+          s = p.read_text()
+
+          s = s.replace(
+              "rx_status->flag |= RX_FLAG_40MHZ;",
+              "rx_status->bw = RATE_INFO_BW_40;"
+          )
+          s = s.replace(
+              "rx_status->flag |= RX_FLAG_HT;",
+              "rx_status->encoding = RX_ENC_HT;"
+          )
+          s = s.replace(
+              "ieee80211_beacon_get_template(hw, mac->vif, &offs)",
+              "ieee80211_beacon_get_template(hw, mac->vif, &offs, 0)"
+          )
+
+          p.write_text(s)
+          PY
 
       - name: Build driver
         run: |
