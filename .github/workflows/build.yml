@@ -39,6 +39,16 @@ jobs:
             -e 's/sta->bandwidth/sta->deflink.bandwidth/g' \
             -e 's/__kernel_time_t/long/g' {} +
 
+      - name: Disable unused RTL8192SE module
+        run: |
+          grep -RIl 'CONFIG_RTL8192SE=m' rtl8192su --include='Makefile' --include='*.mk' | while read file; do
+            sed -i 's/CONFIG_RTL8192SE=m/CONFIG_RTL8192SE=n/g' "$file"
+          done
+          if grep -R 'CONFIG_RTL8192SE=m' rtl8192su --include='Makefile' --include='*.mk'; then
+            echo "RTL8192SE is still enabled"
+            exit 1
+          fi
+
       - name: Build driver
         run: |
           make -C rtl8192su KSRC="$GITHUB_WORKSPACE/linux" V=1
