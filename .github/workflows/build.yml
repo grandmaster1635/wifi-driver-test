@@ -1,3 +1,4 @@
+
 name: RTL8191SU driver build test
 
 'on':
@@ -218,6 +219,14 @@ jobs:
               ),
               ("bss_conf->assoc", "vif->cfg.assoc"),
               ("bss_conf->aid", "vif->cfg.aid"),
+              (
+                  "rtl_watch_dog_timer_callback((unsigned long)hw);",
+                  "mod_timer(&rtlpriv->works.watchdog_timer, jiffies);"
+              ),
+              (
+                  "rtl_op_stop(hw);",
+                  "rtl_op_stop(hw, true);"
+              ),
           ]
 
           for old, new in replacements:
