@@ -314,9 +314,7 @@ jobs:
                   s
               )
               if not already_fixed:
-                  raise SystemExit(
-                      "ERROR: ieee80211_check_tim call not found"
-                  )
+                  raise SystemExit("ERROR: ieee80211_check_tim call not found")
               print("ieee80211_check_tim already fixed")
           else:
               print("ieee80211_check_tim API fixed")
@@ -350,9 +348,7 @@ jobs:
           s, count = re.subn(pattern, replacement, s, count=1)
 
           if count != 1:
-              raise SystemExit(
-                  "ERROR: old rate_control_send_low call not found"
-              )
+              raise SystemExit("ERROR: old rate_control_send_low call not found")
 
           old = (
               "static void *rtl_rate_alloc(struct ieee80211_hw *hw, "
@@ -387,6 +383,43 @@ jobs:
 
           p.write_text(s)
           print("regd.c warning fixed")
+          PY
+
+      - name: Fix PCI DMA API
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("rtl8192su/rtlwifi/pci.c")
+          s = p.read_text()
+
+          if "#include <linux/dma-mapping.h>" not in s:
+              s = s.replace(
+                  "#include <linux/module.h>",
+                  "#include <linux/module.h>\n#include <linux/dma-mapping.h>",
+                  1
+              )
+
+          compatibility = [
+              "/* Linux 6.18 PCI DMA compatibility */",
+              "#define pci_zalloc_consistent(pdev, size, dma) dma_alloc_coherent(&(pdev)->dev, (size), (dma), GFP_KERNEL)",
+              "#define pci_free_consistent(pdev, size, cpu, dma) dma_free_coherent(&(pdev)->dev, (size), (cpu), (dma))",
+              "#define PCI_DMA_TODEVICE DMA_TO_DEVICE",
+              "#define PCI_DMA_FROMDEVICE DMA_FROM_DEVICE",
+              "#define pci_set_dma_mask(pdev, mask) dma_set_mask(&(pdev)->dev, (mask))",
+              "#define pci_set_consistent_dma_mask(pdev, mask) dma_set_coherent_mask(&(pdev)->dev, (mask))",
+          ]
+
+          marker = "/* Linux 6.18 PCI DMA compatibility */"
+          if marker not in s:
+              s = s.replace(
+                  "#include <linux/dma-mapping.h>",
+                  "#include <linux/dma-mapping.h>\n" + "\n".join(compatibility),
+                  1
+              )
+
+          p.write_text(s)
+          print("PCI DMA compatibility fixes applied")
           PY
 
       - name: Build driver
