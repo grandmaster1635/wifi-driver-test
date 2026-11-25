@@ -1,4 +1,3 @@
-
 name: RTL8191SU driver build test
 
 'on':
@@ -420,6 +419,105 @@ jobs:
 
           p.write_text(s)
           print("PCI DMA compatibility fixes applied")
+          PY
+
+      - name: Fix PCI DMA, beacon and tasklet APIs
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("rtl8192su/rtlwifi/pci.c")
+          s = p.read_text()
+
+          if "#include <linux/dma-mapping.h>" not in s:
+              s = s.replace(
+                  "#include <linux/module.h>",
+                  "#include <linux/module.h>\n#include <linux/dma-mapping.h>",
+                  1
+              )
+
+          marker = "/* Linux 6.18 PCI DMA compatibility */"
+          if marker not in s:
+              compat = """/* Linux 6.18 PCI DMA compatibility */
+          #define pci_map_single(pdev, addr, size, dir) dma_map_single(&(pdev)->dev, (addr), (size), (dir))
+          #define pci_unmap_single(pdev, dma, size, dir) dma_unmap_single(&(pdev)->dev, (dma), (size), (dir))
+          #define pci_dma_mapping_error(pdev, dma) dma_mapping_error(&(pdev)->dev, (dma))
+          """
+              s = s.replace(
+                  "#include <linux/dma-mapping.h>",
+                  "#include <linux/dma-mapping.h>\n" + compat,
+                  1
+              )
+          else:
+              extra = [
+                  "#define pci_map_single(pdev, addr, size, dir) dma_map_single(&(pdev)->dev, (addr), (size), (dir))",
+                  "#define pci_unmap_single(pdev, dma, size, dir) dma_unmap_single(&(pdev)->dev, (dma), (size), (dir))",
+                  "#define pci_dma_mapping_error(pdev, dma) dma_mapping_error(&(pdev)->dev, (dma))",
+              ]
+              for line in extra:
+                  if line not in s:
+                      s = s.replace(marker, marker + "\n" + line, 1)
+
+          old_beacon = "pskb = ieee80211_beacon_get(hw, mac->vif);"
+          new_beacon = "pskb = ieee80211_beacon_get(hw, mac->vif, 0);"
+
+          if old_beacon in s:
+              s = s.replace(old_beacon, new_beacon, 1)
+          elif new_beacon not in s:
+              raise SystemExit("ERROR: beacon_get call not found")
+
+          old_irq = """static void _rtl_pci_irq_tasklet(struct ieee80211_hw *hw)
+          {
+          \t_rtl_pci_tx_chk_waitq(hw);
+          }"""
+
+          new_irq = """static void _rtl_pci_irq_tasklet(struct tasklet_struct *tasklet)
+          {
+          \tstruct rtl_priv *rtlpriv =
+          \t\tfrom_tasklet(rtlpriv, tasklet, works.irq_tasklet);
+
+          \t_rtl_pci_tx_chk_waitq(rtlpriv->works.hw);
+          }"""
+
+          if old_irq in s:
+              s = s.replace(old_irq, new_irq, 1)
+          elif "static void _rtl_pci_irq_tasklet(struct tasklet_struct *tasklet)" not in s:
+              raise SystemExit("ERROR: IRQ tasklet callback not found")
+
+          old_bcn = """static void _rtl_pci_prepare_bcn_tasklet(struct ieee80211_hw *hw)
+          {
+          \tstruct rtl_priv *rtlpriv = rtl_priv(hw);"""
+
+          new_bcn = """static void _rtl_pci_prepare_bcn_tasklet(struct tasklet_struct *tasklet)
+          {
+          \tstruct rtl_priv *rtlpriv =
+          \t\tfrom_tasklet(rtlpriv, tasklet, works.irq_prepare_bcn_tasklet);
+          \tstruct ieee80211_hw *hw = rtlpriv->works.hw;"""
+
+          if old_bcn in s:
+              s = s.replace(old_bcn, new_bcn, 1)
+          elif "static void _rtl_pci_prepare_bcn_tasklet(struct tasklet_struct *tasklet)" not in s:
+              raise SystemExit("ERROR: beacon tasklet callback not found")
+
+          old_init = """tasklet_init(&rtlpriv->works.irq_tasklet,
+          \t\t     (void (*)(unsigned long))_rtl_pci_irq_tasklet,
+          \t\t     (unsigned long)hw);
+          tasklet_init(&rtlpriv->works.irq_prepare_bcn_tasklet,
+          \t\t     (void (*)(unsigned long))_rtl_pci_prepare_bcn_tasklet,
+          \t\t     (unsigned long)hw);"""
+
+          new_init = """tasklet_setup(&rtlpriv->works.irq_tasklet,
+          \t\t     _rtl_pci_irq_tasklet);
+          tasklet_setup(&rtlpriv->works.irq_prepare_bcn_tasklet,
+          \t\t     _rtl_pci_prepare_bcn_tasklet);"""
+
+          if old_init in s:
+              s = s.replace(old_init, new_init, 1)
+          elif "tasklet_setup(&rtlpriv->works.irq_tasklet" not in s:
+              raise SystemExit("ERROR: tasklet_init block not found")
+
+          p.write_text(s)
+          print("PCI DMA, beacon and tasklet API fixes verified")
           PY
 
       - name: Build driver
