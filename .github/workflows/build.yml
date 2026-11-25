@@ -1,4 +1,4 @@
- 
+
 name: RTL8191SU driver build test
 
 'on':
@@ -367,6 +367,26 @@ jobs:
 
           p.write_text(s)
           print("Rate control API fixes applied")
+          PY
+
+      - name: Fix regd.c warning
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("rtl8192su/rtlwifi/regd.c")
+          s = p.read_text()
+
+          old = "if (wiphy == NULL || &rtlpriv->regd == NULL)"
+          new = "if (wiphy == NULL)"
+
+          if old in s:
+              s = s.replace(old, new, 1)
+          elif new not in s:
+              raise SystemExit("ERROR: regd.c condition not found")
+
+          p.write_text(s)
+          print("regd.c warning fixed")
           PY
 
       - name: Build driver
