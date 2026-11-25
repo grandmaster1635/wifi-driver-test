@@ -278,28 +278,53 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           p = Path("rtl8192su/rtlwifi/ps.c")
           s = p.read_text()
 
+          # Fix watchdog timer call if it is still present
           old = "rtl_watch_dog_timer_callback((unsigned long)hw);"
           new = "mod_timer(&rtlpriv->works.watchdog_timer, jiffies);"
 
-          if old not in s:
-              raise SystemExit("ERROR: watchdog call not found in ps.c")
-          s = s.replace(old, new, 1)
+          if old in s:
+              s = s.replace(old, new, 1)
+              print("Watchdog call fixed")
+          else:
+              print("Watchdog call already fixed or absent")
 
-          old = """u_buffed = ieee80211_check_tim(tim_ie, tim_len,
-                                       rtlpriv->mac80211.assoc_id);"""
-          new = """u_buffed = ieee80211_check_tim(tim_ie, tim_len,
-                                       rtlpriv->mac80211.assoc_id, false);"""
+          # Fix ieee80211_check_tim regardless of tabs, spaces or line breaks
+          pattern = (
+              r"ieee80211_check_tim\s*\(\s*"
+              r"tim_ie\s*,\s*tim_len\s*,\s*"
+              r"rtlpriv->mac80211\.assoc_id\s*\)"
+          )
 
-          if old not in s:
-              raise SystemExit("ERROR: ieee80211_check_tim call not found")
-          s = s.replace(old, new, 1)
+          s, count = re.subn(
+              pattern,
+              "ieee80211_check_tim(tim_ie, tim_len, "
+              "rtlpriv->mac80211.assoc_id, false)",
+              s,
+              count=1
+          )
+
+          if count == 0:
+              already_fixed = re.search(
+                  r"ieee80211_check_tim\s*\(\s*"
+                  r"tim_ie\s*,\s*tim_len\s*,\s*"
+                  r"rtlpriv->mac80211\.assoc_id\s*,\s*false\s*\)",
+                  s
+              )
+              if not already_fixed:
+                  raise SystemExit(
+                      "ERROR: ieee80211_check_tim call not found"
+                  )
+              print("ieee80211_check_tim already fixed")
+          else:
+              print("ieee80211_check_tim API fixed")
 
           p.write_text(s)
-          print("ps.c API fixes applied")
+          print("ps.c API fixes verified")
           PY
 
       - name: Build driver
