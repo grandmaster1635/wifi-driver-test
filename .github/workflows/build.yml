@@ -1,4 +1,4 @@
-
+ 
 name: RTL8191SU driver build test
 
 'on':
@@ -283,7 +283,6 @@ jobs:
           p = Path("rtl8192su/rtlwifi/ps.c")
           s = p.read_text()
 
-          # Fix watchdog timer call if it is still present
           old = "rtl_watch_dog_timer_callback((unsigned long)hw);"
           new = "mod_timer(&rtlpriv->works.watchdog_timer, jiffies);"
 
@@ -293,7 +292,6 @@ jobs:
           else:
               print("Watchdog call already fixed or absent")
 
-          # Fix ieee80211_check_tim regardless of tabs, spaces or line breaks
           pattern = (
               r"ieee80211_check_tim\s*\(\s*"
               r"tim_ie\s*,\s*tim_len\s*,\s*"
@@ -325,6 +323,50 @@ jobs:
 
           p.write_text(s)
           print("ps.c API fixes verified")
+          PY
+
+      - name: Fix rate control API
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("rtl8192su/rtlwifi/rc.c")
+          s = p.read_text()
+
+          pattern = (
+              r'\tif\s*\(rate_control_send_low\(sta,\s*priv_sta,\s*txrc\)\)'
+              r'\s*\n\t\treturn;'
+          )
+
+          replacement = (
+              '\tif (not_data) {\n'
+              '\t\trates[0].idx = 0;\n'
+              '\t\trates[0].count = 1;\n'
+              '\t\treturn;\n'
+              '\t}'
+          )
+
+          s, count = re.subn(pattern, replacement, s, count=1)
+
+          if count != 1:
+              raise SystemExit(
+                  "ERROR: old rate_control_send_low call not found"
+              )
+
+          old = (
+              "static void *rtl_rate_alloc(struct ieee80211_hw *hw, "
+              "struct dentry *debugfsdir)"
+          )
+          new = "static void *rtl_rate_alloc(struct ieee80211_hw *hw)"
+
+          if old not in s:
+              raise SystemExit("ERROR: rtl_rate_alloc declaration not found")
+
+          s = s.replace(old, new, 1)
+
+          p.write_text(s)
+          print("Rate control API fixes applied")
           PY
 
       - name: Build driver
